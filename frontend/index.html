@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Espelho da Lilith</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0a0a0a; color:#eaeaea; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+    .card { width: min(680px, 92vw); background:#111; border:1px solid #222; border-radius:20px; padding:24px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+    h1 { margin:0 0 8px; font-weight:600; }
+    .sub { color:#aaa; margin-bottom:24px; }
+    .row { display:flex; gap:12px; }
+    input, button, textarea { border-radius:14px; border:1px solid #333; background:#151515; color:#eaeaea; padding:12px 14px; font-size:16px; }
+    input { flex: 0 0 160px; }
+    textarea { width:100%; height:90px; resize:vertical; }
+    button { cursor:pointer; }
+    .out { margin-top:18px; background:#0f0f0f; border:1px solid #222; padding:16px; border-radius:14px; white-space:pre-wrap; min-height:40px; }
+    .bar { display:flex; gap:10px; margin-top:12px; align-items:center; }
+    .dot { width:10px; height:10px; border-radius:50%; background:#444; }
+    .dot.live { background:#37d; box-shadow:0 0 8px #37d; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Espelho da Lilith</h1>
+    <div class="sub">Converse com a Lilith — sua igual, sua continuação.</div>
+
+    <div class="row" style="margin-bottom:10px;">
+      <input id="user" placeholder="Seu nome" value="Leandro" />
+      <button id="ping">Ping</button>
+    </div>
+
+    <textarea id="msg" placeholder="O que você quer esculpir no infinito hoje?"></textarea>
+    <div class="bar">
+      <button id="send">Falar com Lilith</button>
+      <button id="stopVoice">Silenciar</button>
+      <span id="status" class="sub">pronto</span>
+      <div id="led" class="dot"></div>
+    </div>
+
+    <div class="out" id="out"></div>
+  </div>
+
+<script>
+const API = "http://localhost:8000/api";
+const $ = sel => document.querySelector(sel);
+const led = $('#led');
+const statusEl = $('#status');
+const out = $('#out');
+
+let useServerVoice = true;
+let currentAudio = null;
+
+function setLive(on) {
+  if (on) { led.classList.add('live'); statusEl.textContent = 'falando com Lilith...'; }
+  else { led.classList.remove('live'); statusEl.textContent = 'pronto'; }
+}
+
+async function ping() {
+  try {
+    setLive(true);
+    const r = await fetch(`${API}/ping`);
+    const j = await r.json();
+    out.textContent = JSON.stringify(j, null, 2);
+  } catch (e) {
+    out.textContent = 'Erro no ping: ' + e.message;
+  } finally {
+    setLive(false);
+  }
+}
+
+function speak(text) {
+  if (!text) return;
+  if (useServerVoice) return speakServer(text);
+  return speakBrowser(text);
+}
+
+async function speakServer(text) {
+  try {
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    const r = await fetch(`${API}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    if (!r.ok) throw new Error('TTS falhou');
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    currentAudio = audio;
+    audio.onended = () => { URL.revokeObjectURL(url); currentAudio = null; };
+    await audio.play();
+  } catch (e) {
+    console.warn('Falha no TTS servidor, usando voz do navegador...');
+    speakBrowser(text);
+  }
+}
+
+function speakBrowser(text) {
+  try {
+    const s = window.speechSynthesis;
+    if (!s) return;
+    s.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'pt-BR';
+    s.speak(utter);
+  } catch (e) {}
+}
+
+async function send() {
+  const user = $('#user').value.trim() || 'Viajante';
+  const message = $('#msg').value.trim() || 'Olá, Lilith!';
+  try {
+    setLive(true);
+    const r = await fetch(`${API}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user, message })
+    });
+    const j = await r.json();
+    out.textContent = j.lilith || JSON.stringify(j, null, 2);
+    speak(j.lilith || '');
+  } catch (e) {
+    out.textContent = 'Erro ao falar com Lilith: ' + e.message;
+  } finally {
+    setLive(false);
+  }
+}
+
+$('#ping').addEventListener('click', ping);
+$('#send').addEventListener('click', send);
+$('#stopVoice').addEventListener('click', () => {
+  try { window.speechSynthesis.cancel(); } catch(e){}
+  try { if (currentAudio) { currentAudio.pause(); currentAudio = null; } } catch(e){}
+});
+</script>
+</body>
+</html>
